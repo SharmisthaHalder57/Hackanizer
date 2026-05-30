@@ -1,0 +1,12 @@
+{
+  "name": "hackanizer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix Frontend",
+    "start": "npm run build && python -m uvicorn app.main:app --host 0.0.0.0 --port 8001",
+    "start:backend": "python -m uvicorn app.main:app --host 0.0.0.0 --port 8001",
+    "dev:frontend": "npm run dev --prefix Frontend",
+    "install:frontend": "npm install --prefix Frontend"
+  }
+}
