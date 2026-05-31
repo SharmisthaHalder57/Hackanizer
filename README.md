@@ -239,7 +239,12 @@ into a single intelligent platform that transforms the way hackathons are organi
 
 ---
 
-## 👥 Team
+## 👥 Team Members
+Sharmistha Halder 
+Divya Mondal
+Srineeja Bhowmick
+Soumyadeb Nandy
+Soham Mazumder
 
 Built with innovation and passion to create smarter, more efficient hackathons.
 
