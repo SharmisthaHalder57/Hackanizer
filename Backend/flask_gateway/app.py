@@ -54,7 +54,7 @@ def proxy(path: str):
             params=params,
             data=request.get_data(),
             allow_redirects=False,
-            timeout=30,
+            timeout=(5, 60),  # (connect timeout, read timeout) in seconds
         )
     except requests.exceptions.ConnectionError:
         return jsonify({

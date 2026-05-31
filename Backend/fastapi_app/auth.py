@@ -1,8 +1,9 @@
 """
 auth.py — Firebase Admin SDK initialization + JWT helpers
 
-Firestore migration: user identity is now the firebase_uid (string),
-not a SQLite integer primary key.
+Multi-tenant update: JWT tokens now include `hackathon_id` so every request
+is scoped to a specific hackathon. New dependency get_hackathon_id_from_token
+extracts this value for use in all routers.
 """
 from __future__ import annotations
 import os
@@ -157,16 +158,17 @@ def verify_firebase_token(id_token: str) -> dict:
 
 # ─── App JWT Helpers ────────────────────────────────────────────────────────────
 
-def create_access_token(firebase_uid: str, role: str) -> str:
+def create_access_token(firebase_uid: str, role: str, hackathon_id: str) -> str:
     """
     Create a signed JWT for our API.
-    'sub' now contains the Firebase UID (string) instead of a SQLite integer.
+    Now includes hackathon_id for multi-tenant data scoping.
     """
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
     payload = {
-        "sub":  firebase_uid,
-        "role": role,
-        "exp":  expire,
+        "sub":          firebase_uid,
+        "role":         role,
+        "hackathon_id": hackathon_id,
+        "exp":          expire,
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -193,7 +195,6 @@ def get_current_user_id(
 ) -> str:
     """
     Extract firebase_uid from Bearer token.
-    Returns a string (Firebase UID) — no longer an integer.
     Raises 401 if missing/invalid.
     """
     if not credentials:
@@ -207,6 +208,30 @@ def get_current_user_id(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
     return str(user_id)
+
+
+def get_hackathon_id_from_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> str:
+    """
+    Extract hackathon_id from Bearer token.
+    All tenant-scoped routes use this dependency to determine which hackathon's
+    sub-collection to query. Raises 401 if token is missing or lacks hackathon_id.
+    """
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(credentials.credentials)
+    hackathon_id = payload.get("hackathon_id")
+    if not hackathon_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing hackathon_id — please log in again",
+        )
+    return str(hackathon_id)
 
 
 def require_role(*roles: str):

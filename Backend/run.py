@@ -11,10 +11,15 @@ from pathlib import Path
 
 # Ensure we're running from the Backend directory
 BACKEND_DIR = Path(__file__).parent
+PROJECT_ROOT = BACKEND_DIR.parent
 os.chdir(BACKEND_DIR)
 
 # Add Backend to Python path
 sys.path.insert(0, str(BACKEND_DIR))
+
+# Use the virtual environment's Python interpreter if it exists
+VENV_PYTHON = PROJECT_ROOT / ".venv" / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
+PYTHON_EXECUTABLE = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,8 +32,9 @@ def run_fastapi():
     """Start FastAPI with uvicorn."""
     print(f"\n[FastAPI] Starting on http://localhost:{FASTAPI_PORT}")
     print(f"   Docs: http://localhost:{FASTAPI_PORT}/api/docs\n")
+    print(f"   Using Python: {PYTHON_EXECUTABLE}\n")
     subprocess.run([
-        sys.executable, "-m", "uvicorn",
+        PYTHON_EXECUTABLE, "-m", "uvicorn",
         "fastapi_app.main:app",
         "--host", "0.0.0.0",
         "--port", FASTAPI_PORT,
@@ -41,8 +47,9 @@ def run_flask():
     time.sleep(2)  # Give FastAPI a moment to start first
     print(f"\n[Flask] Starting Gateway on http://localhost:{FLASK_PORT}")
     print(f"   Proxying /api/* -> http://localhost:{FASTAPI_PORT}/api/*\n")
+    print(f"   Using Python: {PYTHON_EXECUTABLE}\n")
     subprocess.run([
-        sys.executable, "-m", "flask",
+        PYTHON_EXECUTABLE, "-m", "flask",
         "--app", "flask_gateway.app",
         "run",
         "--host", "0.0.0.0",

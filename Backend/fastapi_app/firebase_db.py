@@ -1,8 +1,10 @@
 """
 firebase_db.py — Firebase Admin SDK initialization + Firestore client
 
-This module is the single source of truth for Firestore access.
-It replaces the old SQLAlchemy database.py entirely.
+Multi-tenant migration: every hackathon's data lives under
+  /hackathons/{hackathon_id}/{collection}/{doc}
+Use get_hackathon_col(db, hackathon_id, collection) everywhere instead
+of db.collection(COLLECTION).
 """
 from __future__ import annotations
 import os
@@ -12,7 +14,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── Collection Name Constants ─────────────────────────────────────────────────
+# ─── Top-level collection names ────────────────────────────────────────────────
+HACKATHONS       = "hackathons"   # top-level tenant documents
+
+# ─── Sub-collection name constants (used inside each hackathon) ────────────────
 USERS            = "users"
 QUERIES          = "queries"
 ROOM_LOGS        = "room_logs"
@@ -78,8 +83,20 @@ def get_firestore_client():
 def get_firestore():
     """
     FastAPI dependency — yields the Firestore client.
-
-    Usage in a router:
-        db = Depends(get_firestore)
     """
     yield get_firestore_client()
+
+
+def get_hackathon_col(db, hackathon_id: str, sub_collection: str):
+    """
+    Return the Firestore CollectionReference scoped to a specific hackathon.
+
+    Usage:
+        col = get_hackathon_col(db, hackathon_id, USERS)
+        docs = col.stream()
+    """
+    return (
+        db.collection(HACKATHONS)
+        .document(hackathon_id)
+        .collection(sub_collection)
+    )

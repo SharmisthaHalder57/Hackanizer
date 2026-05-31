@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import gsap from 'gsap';
 import { ArrowLeft, Send, CheckCircle, Shield } from 'lucide-react';
 import { ParticlesBackground } from '../components/ParticlesBackground';
+import { api, getHackathonId } from '../../lib/api';
 
 const categories = [
   { id:'event',       name:'Overall Event' },
@@ -58,8 +59,25 @@ export function AnonymousFeedback() {
     setSelectedTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (rating === 0) return;
+
+    // Submit to real API if hackathon_id is available
+    const hackathonId = getHackathonId();
+    if (hackathonId) {
+      try {
+        await api.post(`/feedback?hackathon_id=${encodeURIComponent(hackathonId)}`, {
+          category,
+          rating,
+          tags: selectedTags.length > 0 ? selectedTags : null,
+          comment: feedback || null,
+        });
+      } catch {
+        // Silently degrade — feedback should never block the user
+      }
+    }
+
     if (formRef.current) {
       gsap.to(formRef.current, { opacity:0, y:-10, duration:0.35, ease:'power2.in', onComplete: () => setSubmitted(true) });
     }

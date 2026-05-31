@@ -4,6 +4,8 @@ schemas.py — Pydantic v2 schemas for request / response validation
 Firestore migration: all `id` and `*_id` fields are now `str` (Firestore
 document IDs are auto-generated strings, not integer primary keys).
 `from_attributes=True` is no longer needed since we work with plain dicts.
+
+QR Update: Added MealClaimQRRequest for the QR-based claim flow.
 """
 from __future__ import annotations
 from datetime import datetime
@@ -20,6 +22,31 @@ TaskStatus   = Literal["pending", "completed"]
 ProjectStatus = Literal["pending", "evaluated"]
 
 
+# ─── Hackathon Schemas ─────────────────────────────────────────────────────────
+
+class HackathonCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    location: Optional[str] = None
+    max_participants: Optional[int] = None
+    is_active: bool = True
+
+
+class HackathonOut(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    location: Optional[str] = None
+    max_participants: Optional[int] = None
+    is_active: bool
+    created_at: datetime
+    organizer_id: Optional[str] = None
+
+
 # ─── User Schemas ───────────────────────────────────────────────────────────────
 
 class UserBase(BaseModel):
@@ -34,6 +61,7 @@ class UserOut(UserBase):
     firebase_uid: Optional[str] = None
     photo_url: Optional[str] = None
     current_room: Optional[str] = None
+    hackathon_id: Optional[str] = None   # tenant scope (None for legacy data)
     is_active: bool
     created_at: datetime
 
@@ -41,15 +69,17 @@ class UserOut(UserBase):
 # ─── Auth Schemas ───────────────────────────────────────────────────────────────
 
 class GoogleLoginRequest(BaseModel):
-    """Frontend sends Firebase ID token + chosen role"""
+    """Frontend sends Firebase ID token + chosen role + hackathon context"""
     id_token: str = Field(..., description="Firebase ID token from Google Sign-In")
     role: Role
+    hackathon_id: str = Field(..., description="Hackathon tenant ID")
     skills: Optional[str] = None  # Required if role == mentor
 
 
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    hackathon_id: str
 
 
 class AuthResponse(BaseModel):
@@ -101,6 +131,14 @@ class RoomOccupancy(BaseModel):
 
 class MealClaimRequest(BaseModel):
     meal_type: MealType
+
+
+class MealClaimQRRequest(BaseModel):
+    """
+    Sent by the frontend after the user scans the QR code.
+    qr_token is the raw token string embedded in the QR.
+    """
+    qr_token: str = Field(..., description="Token scanned from the meal QR code")
 
 
 class MealStatusOut(BaseModel):

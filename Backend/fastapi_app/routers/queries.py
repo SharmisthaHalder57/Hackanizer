@@ -1,8 +1,7 @@
 """
 routers/queries.py — Help queries from participants to mentors/judges/volunteers
 
-Firestore migration: queries stored in 'queries' collection.
-Skill matching done in Python after fetching matching users from Firestore.
+Multi-tenant update: all queries scoped to hackathon sub-collection.
 """
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -10,9 +9,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from ..firebase_db import get_firestore, QUERIES, USERS
+from ..firebase_db import get_firestore, get_hackathon_col, QUERIES, USERS
 from ..schemas import QueryCreate, QueryOut, QueryStatusUpdate
-from ..auth import get_current_user_id, decode_access_token, bearer_scheme
+from ..auth import (
+    get_current_user_id, get_hackathon_id_from_token,
+    decode_access_token, bearer_scheme,
+)
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
@@ -32,15 +34,16 @@ def _doc_to_query_out(doc_id: str, data: dict) -> QueryOut:
     )
 
 
-def _find_best_mentor(db, skill: str | None, target_type: str) -> Optional[dict]:
+def _find_best_mentor(db, hackathon_id: str, skill: str | None, target_type: str) -> Optional[dict]:
     """
-    Return (doc_id, full_name) of the best matching user.
-    Skill matching is done in Python since Firestore has no ILIKE.
+    Return best-matching user dict within the hackathon.
+    Skill matching done in Python (Firestore has no ILIKE).
     """
+    users_col = get_hackathon_col(db, hackathon_id, USERS)
+
     if target_type != "mentor":
-        # For judge/volunteer, return first available
         docs = (
-            db.collection(USERS)
+            users_col
             .where("role", "==", target_type)
             .where("is_active", "==", True)
             .limit(1)
@@ -51,9 +54,8 @@ def _find_best_mentor(db, skill: str | None, target_type: str) -> Optional[dict]
         return None
 
     if skill:
-        # Fetch all mentors, filter by skill substring (case-insensitive) in Python
         all_mentors = (
-            db.collection(USERS)
+            users_col
             .where("role", "==", "mentor")
             .where("is_active", "==", True)
             .stream()
@@ -67,7 +69,7 @@ def _find_best_mentor(db, skill: str | None, target_type: str) -> Optional[dict]
 
     # Fallback: any available mentor
     docs = (
-        db.collection(USERS)
+        users_col
         .where("role", "==", "mentor")
         .where("is_active", "==", True)
         .limit(1)
@@ -78,10 +80,11 @@ def _find_best_mentor(db, skill: str | None, target_type: str) -> Optional[dict]
     return None
 
 
-def _get_user_name(db, uid: str | None) -> str | None:
+def _get_user_name(db, hackathon_id: str, uid: str | None) -> str | None:
     if not uid:
         return None
-    doc = db.collection(USERS).document(uid).get()
+    col = get_hackathon_col(db, hackathon_id, USERS)
+    doc = col.document(uid).get()
     if doc.exists:
         return doc.to_dict().get("full_name")
     return None
@@ -91,11 +94,12 @@ def _get_user_name(db, uid: str | None) -> str | None:
 def create_query(
     body: QueryCreate,
     user_id: str = Depends(get_current_user_id),
+    hackathon_id: str = Depends(get_hackathon_id_from_token),
     db=Depends(get_firestore),
 ):
-    """Submit a help query. Automatically tries to assign the best-matched mentor."""
-    matched = _find_best_mentor(db, body.skill, body.target_type)
-    participant_name = _get_user_name(db, user_id)
+    """Submit a help query scoped to the current hackathon. Auto-assigns best-matched mentor."""
+    matched = _find_best_mentor(db, hackathon_id, body.skill, body.target_type)
+    participant_name = _get_user_name(db, hackathon_id, user_id)
 
     now = datetime.now(timezone.utc)
     data = {
@@ -109,21 +113,20 @@ def create_query(
         "participant_name":  participant_name,
         "assigned_to_name":  matched["full_name"] if matched else None,
     }
-    _, doc_ref = db.collection(QUERIES).add(data)
+    queries_col = get_hackathon_col(db, hackathon_id, QUERIES)
+    _, doc_ref = queries_col.add(data)
     return _doc_to_query_out(doc_ref.id, data)
 
 
 @router.get("/me", response_model=List[QueryOut])
 def my_queries(
     user_id: str = Depends(get_current_user_id),
+    hackathon_id: str = Depends(get_hackathon_id_from_token),
     db=Depends(get_firestore),
 ):
-    """Get all queries submitted by the current participant."""
-    docs = (
-        db.collection(QUERIES)
-        .where("participant_id", "==", user_id)
-        .stream()
-    )
+    """Get all queries submitted by the current participant in this hackathon."""
+    col = get_hackathon_col(db, hackathon_id, QUERIES)
+    docs = col.where("participant_id", "==", user_id).stream()
     results = [_doc_to_query_out(d.id, d.to_dict()) for d in docs]
     return sorted(results, key=lambda q: q.created_at, reverse=True)
 
@@ -133,14 +136,12 @@ def assigned_queries(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db=Depends(get_firestore),
 ):
-    """Get queries assigned to the current user (mentor/judge/volunteer)."""
+    """Get queries assigned to the current user (mentor/judge/volunteer) in this hackathon."""
     payload = decode_access_token(credentials.credentials)
     user_id = str(payload["sub"])
-    docs = (
-        db.collection(QUERIES)
-        .where("assigned_to_id", "==", user_id)
-        .stream()
-    )
+    hackathon_id = payload.get("hackathon_id", "")
+    col = get_hackathon_col(db, hackathon_id, QUERIES)
+    docs = col.where("assigned_to_id", "==", user_id).stream()
     results = [_doc_to_query_out(d.id, d.to_dict()) for d in docs]
     return sorted(results, key=lambda q: q.created_at, reverse=True)
 
@@ -150,11 +151,13 @@ def all_queries(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db=Depends(get_firestore),
 ):
-    """Get all queries — organizer only."""
+    """Get all queries in this hackathon — organizer only."""
     payload = decode_access_token(credentials.credentials)
     if payload.get("role") != "organizer":
         raise HTTPException(status_code=403, detail="Organizer access required")
-    docs = db.collection(QUERIES).stream()
+    hackathon_id = payload.get("hackathon_id", "")
+    col = get_hackathon_col(db, hackathon_id, QUERIES)
+    docs = col.stream()
     results = [_doc_to_query_out(d.id, d.to_dict()) for d in docs]
     return sorted(results, key=lambda q: q.created_at, reverse=True)
 
@@ -163,11 +166,13 @@ def all_queries(
 def update_query_status(
     query_id: str,
     body: QueryStatusUpdate,
-    _: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id),
+    hackathon_id: str = Depends(get_hackathon_id_from_token),
     db=Depends(get_firestore),
 ):
     """Update query status (mentor marks in-progress or resolved)."""
-    doc_ref = db.collection(QUERIES).document(query_id)
+    col = get_hackathon_col(db, hackathon_id, QUERIES)
+    doc_ref = col.document(query_id)
     doc = doc_ref.get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Query not found")
@@ -175,7 +180,7 @@ def update_query_status(
     update: dict = {"status": body.status}
     if body.assigned_to_id:
         update["assigned_to_id"] = body.assigned_to_id
-        update["assigned_to_name"] = _get_user_name(db, body.assigned_to_id)
+        update["assigned_to_name"] = _get_user_name(db, hackathon_id, body.assigned_to_id)
 
     doc_ref.update(update)
     data = {**doc.to_dict(), **update}

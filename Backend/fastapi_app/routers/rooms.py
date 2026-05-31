@@ -1,19 +1,16 @@
 """
 routers/rooms.py — Room entry/exit tracking + occupancy
 
-Firestore migration:
-- Room logs stored in 'room_logs' collection
-- User current_room updated on their user document
-- Occupancy derived from users where current_room != None
+Multi-tenant update: room logs and user updates scoped to hackathon sub-collection.
 """
 from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends
 
-from ..firebase_db import get_firestore, ROOM_LOGS, USERS
+from ..firebase_db import get_firestore, get_hackathon_col, ROOM_LOGS, USERS
 from ..schemas import RoomEntryRequest, RoomOccupancy
-from ..auth import get_current_user_id
+from ..auth import get_current_user_id, get_hackathon_id_from_token
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -29,20 +26,23 @@ ROOM_CAPACITIES: dict[str, int] = {
 def log_room_entry(
     body: RoomEntryRequest,
     user_id: str = Depends(get_current_user_id),
+    hackathon_id: str = Depends(get_hackathon_id_from_token),
     db=Depends(get_firestore),
 ):
     """Log a room entry or exit event and update the user's current_room."""
-    # Record the room log
-    db.collection(ROOM_LOGS).add({
+    # Record the room log in hackathon sub-collection
+    get_hackathon_col(db, hackathon_id, ROOM_LOGS).add({
         "user_id":   user_id,
         "room":      body.room,
         "action":    body.action,
         "timestamp": datetime.now(timezone.utc),
     })
 
-    # Update user's current_room
+    # Update user's current_room in hackathon sub-collection
     new_room = body.room if body.action == "enter" else None
-    db.collection(USERS).document(user_id).update({"current_room": new_room})
+    get_hackathon_col(db, hackathon_id, USERS).document(user_id).update(
+        {"current_room": new_room}
+    )
 
     return {"ok": True, "room": body.room, "action": body.action}
 
@@ -50,11 +50,12 @@ def log_room_entry(
 @router.get("/occupancy", response_model=List[RoomOccupancy])
 def get_room_occupancy(
     _: str = Depends(get_current_user_id),
+    hackathon_id: str = Depends(get_hackathon_id_from_token),
     db=Depends(get_firestore),
 ):
-    """Return current headcount in each room (users whose current_room is set)."""
-    # Firestore doesn't support != None directly; we fetch active users and filter in Python
-    all_users = db.collection(USERS).where("is_active", "==", True).stream()
+    """Return current headcount in each room for this hackathon."""
+    users_col = get_hackathon_col(db, hackathon_id, USERS)
+    all_users = users_col.where("is_active", "==", True).stream()
 
     room_map: dict[str, list[str]] = {}
     for doc in all_users:

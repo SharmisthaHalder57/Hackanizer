@@ -1,21 +1,21 @@
 """
 main.py — FastAPI application entry point
 
-Firestore migration: SQLAlchemy engine and Base.metadata.create_all() removed.
-Firebase is initialized via firebase_db.init_firebase_app() at startup.
+Multi-tenant update: hackathons router added for tenant management.
+All other routers now scope data to hackathon sub-collections via JWT.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .firebase_db import init_firebase_app
 from .auth import init_firebase
-from .routers import auth, users, queries, rooms, meals, sos, feedback, projects, tasks, analytics
+from .routers import auth, users, queries, rooms, meals, sos, feedback, projects, tasks, analytics, hackathons
 
 # ─── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="HackAnizer API",
-    description="Backend API for the HackAnizer Event Management Platform (Firestore)",
-    version="2.0.0",
+    description="Multi-tenant Backend API for the HackAnizer Event Management Platform (Firestore)",
+    version="3.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -46,7 +46,13 @@ async def startup():
 # ─── Routers ───────────────────────────────────────────────────────────────────
 API_PREFIX = "/api"
 
+# Public — no auth required
+app.include_router(hackathons.router, prefix=API_PREFIX)
+
+# Auth
 app.include_router(auth.router,      prefix=API_PREFIX)
+
+# Protected — all scoped to hackathon via JWT
 app.include_router(users.router,     prefix=API_PREFIX)
 app.include_router(queries.router,   prefix=API_PREFIX)
 app.include_router(rooms.router,     prefix=API_PREFIX)
@@ -60,4 +66,9 @@ app.include_router(analytics.router, prefix=API_PREFIX)
 # ─── Health Check ──────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "HackAnizer FastAPI", "database": "Firestore"}
+    return {
+        "status": "ok",
+        "service": "HackAnizer FastAPI",
+        "database": "Firestore",
+        "multitenancy": "enabled",
+    }

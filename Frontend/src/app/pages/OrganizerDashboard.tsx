@@ -8,6 +8,7 @@ import {
 import { EntryExitFAB } from '../components/EntryExitFAB';
 import { api } from '../../lib/api';
 import { ParticlesBackground } from '../components/ParticlesBackground';
+import { useHackathon } from '../../lib/hackathon-context';
 
 interface UserData {
   id: string; name: string; email: string;
@@ -27,6 +28,7 @@ const tabs = [
 
 export function OrganizerDashboard() {
   const navigate  = useNavigate();
+  const { hackathon } = useHackathon();
   const [activeTab, setActiveTab] = useState('overview');
   const [users, setUsers]   = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +108,11 @@ export function OrganizerDashboard() {
             <h1 className="text-3xl font-serif leading-tight font-light truncate">
               Organizer
             </h1>
+            {hackathon && (
+              <p className="text-[9px] uppercase tracking-[0.2em] text-white/30 mt-1 truncate">
+                {hackathon.name}
+              </p>
+            )}
           </div>
 
           <nav className="stagger-reveal flex flex-col gap-2 mb-12">

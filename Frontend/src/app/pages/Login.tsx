@@ -2,12 +2,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { ArrowRight, Code2, Loader2, Play, X, ChevronRight, Sparkles, Zap, Trophy, Target } from 'lucide-react';
-import { auth, setToken } from '../../lib/api';
+import {
+  ArrowRight, Code2, Loader2, X, ChevronRight, Sparkles, Zap, Trophy,
+  Target, Calendar, MapPin, Users, ChevronLeft, Building2, Check,
+} from 'lucide-react';
+import { auth, hackathons, setToken, setHackathonId, type HackathonData } from '../../lib/api';
 import { signInWithGoogle } from '../../lib/firebase';
 import { ParticlesBackground } from '../components/ParticlesBackground';
 
 gsap.registerPlugin(ScrollTrigger);
+
+type LoginStep = 'landing' | 'hackathon-select' | 'role-select' | 'auth';
 
 interface LoginFormData {
   name: string;
@@ -23,7 +28,7 @@ const roles = [
     label: 'Hacker',
     desc: 'Architect the impossible. Turn radical ideas into working prototypes in 48 hours.',
     image: 'https://images.unsplash.com/photo-1550439062-609e1531270e?q=80&w=2000&auto=format&fit=crop',
-    accent: '#E5E4E2', // Platinum
+    accent: '#E5E4E2',
   },
   {
     id: '02',
@@ -31,7 +36,7 @@ const roles = [
     label: 'Mentor',
     desc: 'Cultivate visionary talent. Guide the next generation of tech pioneers.',
     image: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2000&auto=format&fit=crop',
-    accent: '#D4AF37', // Gold
+    accent: '#D4AF37',
   },
   {
     id: '03',
@@ -39,7 +44,7 @@ const roles = [
     label: 'Judge',
     desc: 'Evaluate premier innovations. Crown the architects of tomorrow.',
     image: 'https://images.unsplash.com/photo-1589829085413-56de8ae18c73?q=80&w=2000&auto=format&fit=crop',
-    accent: '#B76E79', // Rose Gold
+    accent: '#B76E79',
   },
   {
     id: '04',
@@ -47,7 +52,7 @@ const roles = [
     label: 'Volunteer',
     desc: 'Orchestrate the chaos. Keep the adrenaline pumping and the event running flawlessly.',
     image: 'https://images.unsplash.com/photo-1511649475669-e288648b2339?q=80&w=2000&auto=format&fit=crop',
-    accent: '#CD7F32', // Bronze
+    accent: '#CD7F32',
   },
   {
     id: '05',
@@ -55,64 +60,69 @@ const roles = [
     label: 'Organizer',
     desc: 'Command the ecosystem. Direct the narrative of the grandest hackathon on earth.',
     image: 'https://images.unsplash.com/photo-1492551557933-34265f7af79e?q=80&w=2000&auto=format&fit=crop',
-    accent: '#C0C0C0', // Silver
+    accent: '#C0C0C0',
   },
 ];
 
 export function Login() {
   const navigate = useNavigate();
+  const [step, setStep] = useState<LoginStep>('landing');
   const [form, setForm] = useState<LoginFormData>({ name: '', email: '', userType: 'participant' });
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  // Hackathon state
+  const [hackathonList, setHackathonList] = useState<HackathonData[]>([]);
+  const [hackathonsLoading, setHackathonsLoading] = useState(false);
+  const [selectedHackathon, setSelectedHackathon] = useState<HackathonData | null>(null);
+
+  // Drawer state
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const drawerRef    = useRef<HTMLDivElement>(null);
+  const overlayRef   = useRef<HTMLDivElement>(null);
 
   const selected = roles.find(r => r.type === form.userType)!;
 
+  // ─── Entrance animations ───────────────────────────────────────────────────
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Left Panel Entrance
       gsap.from('.stagger-reveal', {
-        opacity: 0,
-        y: 40,
-        duration: 1.8,
-        ease: 'power4.out',
-        stagger: 0.15,
-        delay: 0.2
+        opacity: 0, y: 40, duration: 1.8, ease: 'power4.out', stagger: 0.15, delay: 0.2,
       });
-
-      // Right Panel elements Entrance
       gsap.from('.scroll-reveal', {
         scrollTrigger: { trigger: '.scroll-container', start: 'top 80%' },
-        opacity: 0,
-        y: 40,
-        duration: 1.2,
-        ease: 'power3.out',
-        stagger: 0.15
+        opacity: 0, y: 40, duration: 1.2, ease: 'power3.out', stagger: 0.15,
       });
-
       gsap.from('.role-row', {
         scrollTrigger: { trigger: '.roles-container', start: 'top 80%' },
-        opacity: 0,
-        x: 50,
-        duration: 1.5,
-        ease: 'power3.out',
-        stagger: 0.2
+        opacity: 0, x: 50, duration: 1.5, ease: 'power3.out', stagger: 0.2,
       });
     }, containerRef);
     return () => ctx.revert();
   }, []);
 
-  // Drawer Animation
+  // ─── Fetch hackathons when user clicks "Get Started" ───────────────────────
+  const fetchHackathons = async () => {
+    setHackathonsLoading(true);
+    try {
+      const list = await hackathons.list();
+      setHackathonList(list);
+    } catch {
+      setHackathonList([]);
+    } finally {
+      setHackathonsLoading(false);
+    }
+  };
+
+  // ─── Drawer animations ─────────────────────────────────────────────────────
   useEffect(() => {
     if (isDrawerOpen) {
       gsap.to(overlayRef.current, { opacity: 1, duration: 0.6, ease: 'power3.out', display: 'block' });
       gsap.fromTo(drawerRef.current,
         { x: '100%' },
-        { x: '0%', duration: 0.8, ease: 'expo.out' }
+        { x: '0%', duration: 0.8, ease: 'expo.out' },
       );
     }
   }, [isDrawerOpen]);
@@ -124,34 +134,49 @@ export function Login() {
 
   const closeDrawer = () => {
     gsap.to(overlayRef.current, {
-      opacity: 0, duration: 0.5, ease: 'power2.in', onComplete: () => {
-        if (overlayRef.current) overlayRef.current.style.display = 'none';
-      }
+      opacity: 0, duration: 0.5, ease: 'power2.in',
+      onComplete: () => { if (overlayRef.current) overlayRef.current.style.display = 'none'; },
     });
     gsap.to(drawerRef.current, {
       x: '100%', duration: 0.6, ease: 'expo.in',
-      onComplete: () => setIsDrawerOpen(false)
+      onComplete: () => setIsDrawerOpen(false),
     });
+  };
+
+  // ─── Step navigation ───────────────────────────────────────────────────────
+  const goToHackathonSelect = () => {
+    fetchHackathons();
+    setStep('hackathon-select');
+  };
+
+  const selectHackathon = (h: HackathonData) => {
+    setSelectedHackathon(h);
+    setHackathonId(h.id);
+    setStep('role-select');
+  };
+
+  // ─── Submit handlers ───────────────────────────────────────────────────────
+  const routes: Record<string, string> = {
+    participant: '/participant', mentor: '/mentor',
+    judge: '/judge', volunteer: '/volunteer', organizer: '/organizer',
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedHackathon) return;
     setIsLoading(true);
     setApiError(null);
 
-    const routes: Record<string, string> = {
-      participant: '/participant', mentor: '/mentor',
-      judge: '/judge', volunteer: '/volunteer', organizer: '/organizer',
-    };
-
-    const mockToken = `mock-token-${encodeURIComponent(form.email)}-${encodeURIComponent(form.name)}`;
-
     try {
-      const response = await auth.googleLogin({ id_token: mockToken, role: form.userType, skills: form.skills });
-      setToken(response.token.access_token);
+      await new Promise(res => setTimeout(res, 600));
+      const mockId    = `local-${Date.now()}`;
+      const mockToken = `local-jwt-${btoa(form.email + ':' + form.userType)}`;
+      setToken(mockToken);
+      setHackathonId(selectedHackathon.id);
       localStorage.setItem('userData', JSON.stringify({
-        id: response.user.id, name: response.user.full_name, email: response.user.email,
-        userType: response.user.role, skills: response.user.skills, photo_url: response.user.photo_url,
+        id: mockId, name: form.name, email: form.email,
+        userType: form.userType, skills: form.skills ?? null, photo_url: null,
+        hackathonId: selectedHackathon.id,
       }));
       closeDrawer();
       setTimeout(() => navigate(routes[form.userType]), 500);
@@ -162,32 +187,38 @@ export function Login() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!selectedHackathon) return;
     setIsLoading(true);
     setApiError(null);
-    const routes: Record<string, string> = {
-      participant: '/participant', mentor: '/mentor',
-      judge: '/judge', volunteer: '/volunteer', organizer: '/organizer',
-    };
 
     try {
       const credential = await signInWithGoogle();
       const idToken = await credential.user.getIdToken();
-      if (!idToken) throw new Error("Failed to retrieve Firebase ID token");
+      if (!idToken) throw new Error('Failed to retrieve Firebase ID token');
 
-      const response = await auth.googleLogin({ id_token: idToken, role: form.userType, skills: form.skills });
+      const response = await auth.googleLogin({
+        id_token:     idToken,
+        role:         form.userType,
+        hackathon_id: selectedHackathon.id,
+        skills:       form.skills,
+      });
       setToken(response.token.access_token);
+      setHackathonId(response.token.hackathon_id);
       localStorage.setItem('userData', JSON.stringify({
-        id: response.user.id, name: response.user.full_name, email: response.user.email,
-        userType: response.user.role, skills: response.user.skills, photo_url: response.user.photo_url,
+        id: response.user.id, name: response.user.full_name,
+        email: response.user.email, userType: response.user.role,
+        skills: response.user.skills, photo_url: response.user.photo_url,
+        hackathonId: response.token.hackathon_id,
       }));
       closeDrawer();
       setTimeout(() => navigate(routes[form.userType]), 500);
-    } catch (err: any) {
-      setApiError(err.message || 'Google sign-in failed. Please try again.');
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : 'Google sign-in failed. Please try again.');
       setIsLoading(false);
     }
   };
 
+  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div ref={containerRef} className="min-h-screen bg-[#030303] text-white font-sans selection:bg-white selection:text-black flex flex-col lg:flex-row overflow-hidden">
 
@@ -197,8 +228,6 @@ export function Login() {
 
       {/* LEFT PANEL - Fixed Editorial Side */}
       <aside className="lg:w-[45%] lg:h-screen lg:fixed top-0 left-0 border-b lg:border-b-0 lg:border-r border-white/10 flex flex-col justify-between p-8 md:p-16 relative z-10 bg-[#030303] overflow-hidden">
-        
-        {/* Particle Network Animation matched to the premium aesthetic */}
         <ParticlesBackground color="#ffffff" className="absolute inset-0 z-0 opacity-40 mix-blend-screen" />
         <div className="absolute inset-0 bg-gradient-to-b from-[#030303]/40 via-transparent to-[#030303]/80 z-0 pointer-events-none" />
 
@@ -249,109 +278,221 @@ export function Login() {
           </div>
         </div>
 
-        {/* Footer info (Left Side) */}
         <div className="stagger-reveal hidden lg:flex items-center justify-between mt-20 text-[9px] uppercase tracking-[0.2em] text-white/30 relative z-10">
           <span className="bg-[#030303]/80 backdrop-blur-sm px-2 py-1">Global Operations</span>
           <span className="bg-[#030303]/80 backdrop-blur-sm px-2 py-1">© All Rights Reserved</span>
         </div>
       </aside>
 
-      {/* RIGHT PANEL - Scrollable Canvas */}
+      {/* RIGHT PANEL */}
       <main className="lg:w-[55%] lg:ml-[45%] min-h-screen relative z-10 flex flex-col bg-[#050505]">
 
-        {/* Info Section 1: The Experience */}
-        <div className="scroll-container p-8 md:p-16 lg:p-24 border-b border-white/5">
-          <h2 className="scroll-reveal text-xs uppercase tracking-[0.3em] text-white/40 mb-6 flex items-center gap-3">
-            <Zap className="w-4 h-4 text-white/60" /> 
-            The Experience
-          </h2>
-          <p className="scroll-reveal font-serif text-2xl md:text-4xl font-light text-white/90 max-w-xl leading-snug mb-8">
-            Forty-eight hours of pure adrenaline, relentless coding, and radical creativity.
-          </p>
-          <p className="scroll-reveal text-white/50 max-w-lg font-light leading-relaxed mb-8">
-            Expect gourmet provisions, bottomless caffeine, and unrestricted access to industry-leading mentors. We provide the infrastructure, the hardware, and the atmosphere. You bring the genius. No sleep. All code. Total glory.
-          </p>
-        </div>
-
-        {/* Info Section 2: Prizes and Glory */}
-        <div className="scroll-container p-8 md:p-16 lg:px-24 lg:py-20 border-b border-white/5 bg-[#0a0a0a]">
-          <h2 className="scroll-reveal text-xs uppercase tracking-[0.3em] text-white/40 mb-6 flex items-center gap-3">
-            <Trophy className="w-4 h-4 text-white/60" /> 
-            The Spoils
-          </h2>
-          <div className="grid md:grid-cols-2 gap-12">
-            <div className="scroll-reveal">
-              <h3 className="font-serif text-3xl font-light mb-4">Equity-Free Capital</h3>
-              <p className="text-white/50 font-light text-sm leading-relaxed">
-                Compete for a share of our $500,000+ prize pool. Transform your weekend prototype into a fully funded startup without giving up a single share.
+        {/* ── LANDING STEP ── */}
+        {step === 'landing' && (
+          <>
+            <div className="scroll-container p-8 md:p-16 lg:p-24 border-b border-white/5">
+              <h2 className="scroll-reveal text-xs uppercase tracking-[0.3em] text-white/40 mb-6 flex items-center gap-3">
+                <Zap className="w-4 h-4 text-white/60" /> The Experience
+              </h2>
+              <p className="scroll-reveal font-serif text-2xl md:text-4xl font-light text-white/90 max-w-xl leading-snug mb-8">
+                Forty-eight hours of pure adrenaline, relentless coding, and radical creativity.
+              </p>
+              <p className="scroll-reveal text-white/50 max-w-lg font-light leading-relaxed mb-8">
+                Expect gourmet provisions, bottomless caffeine, and unrestricted access to industry-leading mentors. We provide the infrastructure, the hardware, and the atmosphere. You bring the genius.
               </p>
             </div>
-            <div className="scroll-reveal">
-              <h3 className="font-serif text-3xl font-light mb-4">Venture Backing</h3>
-              <p className="text-white/50 font-light text-sm leading-relaxed">
-                Pitch directly to partners from top-tier venture firms pacing the floor. Leave the hackathon with a term sheet in hand.
-              </p>
-            </div>
-          </div>
-        </div>
 
-        {/* Call to Action for Roles */}
-        <div className="p-8 md:p-16 lg:px-24 lg:py-20 border-b border-white/5">
-          <h2 className="text-xs uppercase tracking-[0.3em] text-white/40 mb-4 flex items-center gap-3">
-            <Target className="w-4 h-4 text-white/60" />
-            Select Discipline
-          </h2>
-          <p className="font-serif text-2xl md:text-3xl font-light text-white/80 max-w-lg leading-snug">
-            Choose your theater of operations and unlock access to unparalleled technological frontiers.
-          </p>
-        </div>
-
-        {/* Roles List */}
-        <div className="roles-container flex-1">
-          {roles.map((role) => (
-            <div
-              key={role.type}
-              onClick={() => openDrawer(role.type)}
-              className="role-row group relative border-b border-white/5 cursor-pointer overflow-hidden"
-            >
-              {/* Hover Image Background */}
-              <div className="absolute inset-0 z-0 opacity-0 group-hover:opacity-20 scale-105 group-hover:scale-100 transition-all duration-[1.5s] ease-[cubic-bezier(0.19,1,0.22,1)]">
-                <img src={role.image} alt={role.label} className="w-full h-full object-cover grayscale" />
-                <div className="absolute inset-0 bg-black/60" />
+            <div className="scroll-container p-8 md:p-16 lg:px-24 lg:py-20 border-b border-white/5 bg-[#0a0a0a]">
+              <h2 className="scroll-reveal text-xs uppercase tracking-[0.3em] text-white/40 mb-6 flex items-center gap-3">
+                <Trophy className="w-4 h-4 text-white/60" /> The Spoils
+              </h2>
+              <div className="grid md:grid-cols-2 gap-12">
+                <div className="scroll-reveal">
+                  <h3 className="font-serif text-3xl font-light mb-4">Equity-Free Capital</h3>
+                  <p className="text-white/50 font-light text-sm leading-relaxed">
+                    Compete for a share of our $500,000+ prize pool without giving up a single share.
+                  </p>
+                </div>
+                <div className="scroll-reveal">
+                  <h3 className="font-serif text-3xl font-light mb-4">Venture Backing</h3>
+                  <p className="text-white/50 font-light text-sm leading-relaxed">
+                    Pitch directly to partners from top-tier venture firms. Leave with a term sheet.
+                  </p>
+                </div>
               </div>
+            </div>
 
-              {/* Content */}
-              <div className="relative z-10 p-8 md:p-12 lg:px-24 lg:py-16 flex flex-col md:flex-row md:items-center justify-between gap-8 transition-transform duration-700 group-hover:translate-x-4">
+            <div className="p-8 md:p-16 lg:px-24 lg:py-20 flex-1 flex flex-col justify-center">
+              <h2 className="text-xs uppercase tracking-[0.3em] text-white/40 mb-6 flex items-center gap-3">
+                <Target className="w-4 h-4 text-white/60" /> Your Mission
+              </h2>
+              <p className="font-serif text-2xl md:text-3xl font-light text-white/80 max-w-lg leading-snug mb-12">
+                Select your hackathon and claim your place among the elite.
+              </p>
+              <button
+                id="get-started-btn"
+                onClick={goToHackathonSelect}
+                className="group relative inline-flex items-center gap-4 border border-white/20 px-10 py-5 text-[10px] uppercase tracking-[0.25em] font-bold overflow-hidden max-w-xs transition-all duration-500"
+              >
+                <div className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-out" />
+                <span className="relative z-10 group-hover:text-black transition-colors duration-500">
+                  Select Hackathon
+                </span>
+                <ArrowRight className="relative z-10 w-4 h-4 group-hover:text-black transition-colors duration-500" />
+              </button>
+            </div>
+          </>
+        )}
 
-                <div className="flex items-center gap-8 md:gap-16">
-                  <span className="font-serif text-2xl md:text-4xl text-white/20 group-hover:text-white transition-colors duration-500">
-                    {role.id}
-                  </span>
-                  <div>
-                    <h3 className="font-serif text-3xl md:text-5xl font-light mb-3 group-hover:italic transition-all duration-500">
-                      {role.label}
-                    </h3>
-                    <p className="text-[10px] md:text-xs uppercase tracking-[0.2em] text-white/40 font-medium max-w-sm leading-relaxed">
-                      {role.desc}
-                    </p>
+        {/* ── HACKATHON SELECT STEP ── */}
+        {step === 'hackathon-select' && (
+          <div className="p-8 md:p-16 lg:p-24 flex flex-col min-h-screen">
+            <button
+              onClick={() => setStep('landing')}
+              className="flex items-center gap-2 text-[9px] uppercase tracking-[0.3em] text-white/40 hover:text-white transition-colors mb-12 self-start"
+            >
+              <ChevronLeft className="w-3 h-3" /> Back
+            </button>
+
+            <div className="mb-12">
+              <span className="text-[10px] tracking-[0.3em] uppercase text-white/40 mb-4 block flex items-center gap-2">
+                <Building2 className="w-3 h-3 inline" /> Step 1 of 2
+              </span>
+              <h2 className="font-serif text-4xl md:text-5xl font-light mb-4">Choose Your Hackathon</h2>
+              <p className="text-white/50 font-light text-sm leading-relaxed max-w-md">
+                Multiple events are running concurrently. Select the hackathon you're participating in to scope your session.
+              </p>
+            </div>
+
+            {hackathonsLoading ? (
+              <div className="flex items-center gap-3 py-16 text-white/40">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-[10px] uppercase tracking-widest">Fetching events...</span>
+              </div>
+            ) : hackathonList.length === 0 ? (
+              <div className="border border-white/10 p-8 bg-[#0a0a0a] text-center">
+                <p className="text-white/40 text-sm font-light mb-4">No active hackathons found.</p>
+                <p className="text-white/25 text-xs font-light">
+                  Contact your organizer or check back later.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {hackathonList.map((h) => (
+                  <button
+                    key={h.id}
+                    id={`hackathon-${h.id}`}
+                    onClick={() => selectHackathon(h)}
+                    className="group relative border border-white/10 p-6 md:p-8 bg-[#0a0a0a] hover:border-white/40 hover:bg-[#111] transition-all duration-300 text-left overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-white/[0.02] translate-x-full group-hover:translate-x-0 transition-transform duration-500" />
+                    <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <h3 className="font-serif text-xl md:text-2xl font-light mb-2 group-hover:italic transition-all duration-300">
+                          {h.name}
+                        </h3>
+                        {h.description && (
+                          <p className="text-xs text-white/40 font-light leading-relaxed mb-3 max-w-lg">
+                            {h.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-4 text-[9px] uppercase tracking-[0.2em] text-white/30">
+                          {h.location && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="w-2.5 h-2.5" /> {h.location}
+                            </span>
+                          )}
+                          {(h.start_date || h.end_date) && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-2.5 h-2.5" />
+                              {h.start_date} {h.end_date ? `→ ${h.end_date}` : ''}
+                            </span>
+                          )}
+                          {h.max_participants && (
+                            <span className="flex items-center gap-1">
+                              <Users className="w-2.5 h-2.5" /> {h.max_participants} spots
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="hidden md:flex w-10 h-10 border border-white/10 items-center justify-center group-hover:bg-white group-hover:border-white transition-all duration-300">
+                        <ChevronRight className="w-4 h-4 group-hover:text-black transition-colors duration-300" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ROLE SELECT STEP ── */}
+        {step === 'role-select' && selectedHackathon && (
+          <>
+            <div className="p-8 md:p-16 lg:px-24 lg:py-16 border-b border-white/5">
+              <button
+                onClick={() => setStep('hackathon-select')}
+                className="flex items-center gap-2 text-[9px] uppercase tracking-[0.3em] text-white/40 hover:text-white transition-colors mb-8 self-start"
+              >
+                <ChevronLeft className="w-3 h-3" /> Back to Hackathons
+              </button>
+              <div className="flex items-center gap-3 mb-6">
+                <span className="text-[9px] uppercase tracking-[0.3em] text-white/30 border border-white/10 px-2 py-1 flex items-center gap-1">
+                  <Check className="w-2.5 h-2.5 text-white/50" />
+                  {selectedHackathon.name}
+                </span>
+              </div>
+              <span className="text-[10px] tracking-[0.3em] uppercase text-white/40 mb-4 block">
+                Step 2 of 2
+              </span>
+              <h2 className="font-serif text-3xl md:text-4xl font-light mb-3">Select Discipline</h2>
+              <p className="text-white/50 font-light text-sm leading-relaxed max-w-md">
+                Choose your theater of operations and unlock access to unparalleled technological frontiers.
+              </p>
+            </div>
+
+            <div className="roles-container flex-1">
+              {roles.map((role) => (
+                <div
+                  key={role.type}
+                  id={`role-${role.type}`}
+                  onClick={() => openDrawer(role.type)}
+                  className="role-row group relative border-b border-white/5 cursor-pointer overflow-hidden"
+                >
+                  <div className="absolute inset-0 z-0 opacity-0 group-hover:opacity-20 scale-105 group-hover:scale-100 transition-all duration-[1.5s] ease-[cubic-bezier(0.19,1,0.22,1)]">
+                    <img src={role.image} alt={role.label} className="w-full h-full object-cover grayscale" />
+                    <div className="absolute inset-0 bg-black/60" />
+                  </div>
+                  <div className="relative z-10 p-8 md:p-12 lg:px-24 lg:py-16 flex flex-col md:flex-row md:items-center justify-between gap-8 transition-transform duration-700 group-hover:translate-x-4">
+                    <div className="flex items-center gap-8 md:gap-16">
+                      <span className="font-serif text-2xl md:text-4xl text-white/20 group-hover:text-white transition-colors duration-500">
+                        {role.id}
+                      </span>
+                      <div>
+                        <h3 className="font-serif text-3xl md:text-5xl font-light mb-3 group-hover:italic transition-all duration-500">
+                          {role.label}
+                        </h3>
+                        <p className="text-[10px] md:text-xs uppercase tracking-[0.2em] text-white/40 font-medium max-w-sm leading-relaxed">
+                          {role.desc}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="hidden md:flex w-12 h-12 rounded-full border border-white/10 items-center justify-center group-hover:bg-white group-hover:text-black transition-all duration-500">
+                      <ArrowRight className="w-5 h-5 -rotate-45 group-hover:rotate-0 transition-transform duration-500" />
+                    </div>
                   </div>
                 </div>
-
-                <div className="hidden md:flex w-12 h-12 rounded-full border border-white/10 items-center justify-center group-hover:bg-white group-hover:text-black transition-all duration-500">
-                  <ArrowRight className="w-5 h-5 -rotate-45 group-hover:rotate-0 transition-transform duration-500" />
-                </div>
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
 
-        {/* Mobile Footer */}
         <div className="lg:hidden p-8 text-center text-[9px] uppercase tracking-[0.2em] text-white/30 border-t border-white/5">
           © 2026 Hackanizer. All Rights Reserved.
         </div>
       </main>
 
-      {/* AUTH DRAWER - Ultra Premium */}
+      {/* AUTH DRAWER */}
       <div
         ref={overlayRef}
         className="fixed inset-0 bg-black/40 backdrop-blur-md z-40 hidden"
@@ -364,10 +505,23 @@ export function Login() {
       >
         <div className="flex justify-between items-center mb-16">
           <span className="text-[10px] uppercase tracking-[0.3em] text-white/40">Authentication Portal</span>
-          <button onClick={closeDrawer} className="w-10 h-10 border border-white/10 flex items-center justify-center hover:bg-white hover:text-black transition-colors duration-300">
+          <button
+            onClick={closeDrawer}
+            className="w-10 h-10 border border-white/10 flex items-center justify-center hover:bg-white hover:text-black transition-colors duration-300"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Hackathon badge in drawer */}
+        {selectedHackathon && (
+          <div className="mb-8 border border-white/10 px-4 py-3 bg-white/[0.03] flex items-center gap-3">
+            <Check className="w-3 h-3 text-white/40 shrink-0" />
+            <span className="text-[10px] uppercase tracking-[0.2em] text-white/40 truncate">
+              {selectedHackathon.name}
+            </span>
+          </div>
+        )}
 
         <div className="mb-16">
           <div className="text-5xl font-serif mb-4" style={{ color: selected.accent }}>
@@ -384,46 +538,37 @@ export function Login() {
         <form onSubmit={handleSubmit} className="space-y-12 flex-1">
           <div className="relative group">
             <input
-              type="text"
-              required
-              value={form.name}
+              type="text" required value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })}
               className="w-full bg-transparent border-b border-white/20 pb-4 text-base text-white focus:outline-none focus:border-white transition-colors placeholder:text-transparent peer"
               placeholder="Full Legal Name"
             />
-            <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none 
-              ${form.name ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
+            <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none ${form.name ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
               Full Legal Name
             </label>
           </div>
 
           <div className="relative group">
             <input
-              type="email"
-              required
-              value={form.email}
+              type="email" required value={form.email}
               onChange={e => setForm({ ...form, email: e.target.value })}
               className="w-full bg-transparent border-b border-white/20 pb-4 text-base text-white focus:outline-none focus:border-white transition-colors placeholder:text-transparent peer"
               placeholder="Professional Email"
             />
-            <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none 
-              ${form.email ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
+            <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none ${form.email ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
               Professional Email
             </label>
           </div>
 
           {form.userType === 'mentor' && (
             <div className="relative group">
-               <input
-                type="text"
-                required
-                value={form.skills || ''}
+              <input
+                type="text" required value={form.skills || ''}
                 onChange={e => setForm({ ...form, skills: e.target.value })}
                 className="w-full bg-transparent border-b border-white/20 pb-4 text-base text-white focus:outline-none focus:border-white transition-colors placeholder:text-transparent peer"
                 placeholder="Primary Expertise"
               />
-              <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none 
-                ${form.skills ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
+              <label className={`absolute left-0 text-[10px] uppercase tracking-[0.2em] text-white/40 transition-all duration-300 pointer-events-none ${form.skills ? '-top-5 text-white/70' : 'top-0 peer-focus:-top-5 peer-focus:text-white/70'}`}>
                 Primary Expertise
               </label>
             </div>
@@ -437,8 +582,7 @@ export function Login() {
 
           <div className="pt-8 space-y-6">
             <button
-              type="submit"
-              disabled={isLoading}
+              type="submit" disabled={isLoading}
               className="w-full py-5 text-[10px] uppercase tracking-[0.25em] font-bold transition-all duration-500 disabled:opacity-50 relative overflow-hidden group border border-white/20"
             >
               <div className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-out" />
@@ -448,15 +592,13 @@ export function Login() {
             </button>
 
             <div className="flex items-center gap-4 py-2">
-              <div className="h-px bg-white/10 flex-1"></div>
+              <div className="h-px bg-white/10 flex-1" />
               <span className="text-[9px] uppercase tracking-[0.3em] text-white/30">Alternative</span>
-              <div className="h-px bg-white/10 flex-1"></div>
+              <div className="h-px bg-white/10 flex-1" />
             </div>
 
             <button
-              type="button"
-              disabled={isLoading}
-              onClick={handleGoogleSignIn}
+              type="button" disabled={isLoading} onClick={handleGoogleSignIn}
               className="w-full py-5 bg-[#111] text-white text-[10px] uppercase tracking-[0.25em] flex items-center justify-center gap-4 hover:bg-[#1a1a1a] transition-colors duration-300 border border-white/5"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
