@@ -240,7 +240,7 @@ into a single intelligent platform that transforms the way hackathons are organi
 ---
 
 ## 👥 Team Members
-Sharmistha Halder 
+Sharmistha Halder
 Divya Mondal
 Srineeja Bhowmick
 Soumyadeb Nandy
